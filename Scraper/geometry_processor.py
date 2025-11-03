@@ -44,7 +44,9 @@ class GeometryProcessor():
         xs, ys = edge.geometry.xy
         xs = list(xs)
         ys = list(ys)
-        coords = []
+        right_side = []
+        left_side = []
+        
         if len(xs) == len(ys):
             for i in range(len(xs) - 1):
                 x1 = xs[i]
@@ -53,11 +55,13 @@ class GeometryProcessor():
                 y2 = ys[i + 1]
                 coef = self.get_straight_line_coefficients(x1, y1, x2, y2)
                 perpendicular_coef = self.get_perpendicular_line(coef[0], coef[1])
-                (new_left_x1, new__left_y1), (new_right_x1, new_right_y1) = self.segment_from_line(perpendicular_coef[0], perpendicular_coef[1], x1, y1, edge.width_m)
-                (new_left_x2, new__left_y2), (new_right_x2, new_right_y2)  = self.segment_from_line(perpendicular_coef[0], perpendicular_coef[1], x2, y2, edge.width_m)
-                coords.append((new_left_x1, new__left_y1))
-                coords.append((new_right_x1, new_right_y1))
-                coords.append((new_left_x2, new__left_y2))
-                coords.append((new_right_x2, new_right_y2))
+                (new_left_x1, new_left_y1), (new_right_x1, new_right_y1) = self.segment_from_line(perpendicular_coef[0], perpendicular_coef[1], x1, y1, edge.width_m)
+                (new_left_x2, new_left_y2), (new_right_x2, new_right_y2)  = self.segment_from_line(perpendicular_coef[0], perpendicular_coef[1], x2, y2, edge.width_m)
+                left_side.append((new_left_x1, new_left_y1))
+                right_side.append((new_right_x1, new_right_y1))
+                left_side.append((new_left_x2, new_left_y2))
+                right_side.append((new_right_x2, new_right_y2))
+        coords = left_side + right_side[::-1]
+        coords.append(left_side[0])
         polygon = Polygon(coords)
         return polygon
