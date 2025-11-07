@@ -24,6 +24,7 @@ GridFileMetadata = tuple[int, int, int, int, int, str]
     - columns_number (int): Number of columns of the whole gird (not just the segment).
     - segment_h (int): Height of segment (in grid rows).
     - segment_w (int): Width of segment (in grid columns).
+    - metadata_bytes (int): Length of the metadata line (in bytes).
     - byteorder ("little"|"big"): Big-endian or little-endian."""
 
 def create_file(rows_number: int, columns_number: int, segment_h: int, segment_w: int, file_name: str, data_dir: str = "grids"):
@@ -37,7 +38,7 @@ def create_file(rows_number: int, columns_number: int, segment_h: int, segment_w
         FileExistsError: If the file already exists and has incompatible metadata parameters.
         """
     if os.path.exists(os.path.join(data_dir, file_name)):
-        version, rows_n, cols_n, format_segment_h, format_segment_w, format_endian = _read_metadata(file_name, data_dir)
+        version, rows_n, cols_n, format_segment_h, format_segment_w, _, format_endian = _read_metadata(file_name, data_dir)
         
         assert rows_number == rows_n, f"The file already exists and has incompatible rows number: {rows_number} with given {rows_n}"
         assert columns_number == cols_n, f"The file already exists and has incompatible columns number: {columns_number} with given {cols_n}"
@@ -59,7 +60,7 @@ def write_segment(segment: Grid, segment_row: int, segment_col: int, file_name: 
         data_dir (str): Folder with the file.
     """
     metadata = _read_metadata(file_name, data_dir)
-    version, _, _, _, _, _ = _read_metadata(file_name, data_dir)
+    version, _, _, _, _, _, _ = metadata
 
     if version == 1:
         _write_segment_v1(segment, segment_row, segment_col, file_name, data_dir=data_dir, metadata=metadata)
@@ -72,10 +73,10 @@ def read_segment(segment_row: int, segment_col: int, file_name: str, data_dir: s
         segment_row (int): 0-based row index of the segment (in terms of segments, not the grids columns).
         segment_col (int): 0-based column index of the segment (in terms of segments, not the grids columns)."""
     metadata = _read_metadata(file_name, data_dir)
-    version, _, _, _, _, _ = _read_metadata(file_name, data_dir)
+    version, _, _, _, _, _, _ = metadata
 
     if version == 1:
-        _read_segment_v1(segment_row, segment_col, file_name, data_dir=data_dir, metadata=metadata)
+        return _read_segment_v1(segment_row, segment_col, file_name, data_dir=data_dir, metadata=metadata)
     else:
         raise ValueError(f"Unsupported file version {version}")
 
@@ -96,7 +97,7 @@ def _write_segment_v1(segment: Grid, segment_row: int, segment_col: int, file_na
     if metadata is None:
         metadata = _read_metadata(file_name, data_dir)
 
-    _, rows_n, cols_n, format_segment_h, format_segment_w, _ = metadata
+    _, rows_n, cols_n, format_segment_h, format_segment_w, metadata_bytes,_ = metadata
 
     _assert_arguments_v1(segment_row, segment_col, file_name, data_dir=data_dir, metadata=metadata)
 
@@ -128,22 +129,21 @@ def _write_segment_v1(segment: Grid, segment_row: int, segment_col: int, file_na
     REMAINDER_SEGMENT_SIZE = np.prod(format_segment_h, cols_n % format_segment_w) * CELL_SIZE
     ROW_SIZE = SEGMENT_SIZE + REMAINDER_SEGMENT_SIZE
 
-    with open(os.path.join(data_dir, file_name), "rb") as file:
+    with open(os.path.join(data_dir, file_name), "rb+") as file:
         # skip the metadata line
-        while file.read(1) == "\n":
-            continue
+        file.seek(metadata_bytes)
 
         base = file.tell()
         # advance to proper row
         file.seek(base + segment_row * ROW_SIZE + segment_col * SEGMENT_SIZE)
-        segment.tofile(file)
+        segment.astype(np.float32).tofile(file)
 
 
 def _read_segment_v1(segment_row: int, segment_col: int, file_name: str, data_dir: str = "grids", metadata: GridFileMetadata = None):
     if metadata is None:
         metadata = _read_metadata(file_name, data_dir)
 
-    _, rows_n, cols_n, format_segment_h, format_segment_w, _ = metadata
+    _, rows_n, cols_n, format_segment_h, format_segment_w, metadata_bytes, _ = metadata
 
     _assert_arguments_v1(segment_row, segment_col, file_name, data_dir=data_dir, metadata=metadata)
 
@@ -162,14 +162,10 @@ def _read_segment_v1(segment_row: int, segment_col: int, file_name: str, data_di
         SEEKED_SEGMENT_SHAPE = (format_segment_h, format_segment_w, 2)
 
     with open(os.path.join(data_dir, file_name), "rb") as file:
-        # skip the metadata line
-        while file.read(1) == "\n":
-            continue
-
-        base = file.tell()
+        base = metadata_bytes
         # advance to proper row
         file.seek(base + segment_row * ROW_SIZE + segment_col * SEGMENT_SIZE)
-        vector = np.fromfile(file, count=np.prod(SEEKED_SEGMENT_SHAPE))
+        vector = np.fromfile(file, dtype=np.float32, count=np.prod(SEEKED_SEGMENT_SHAPE))
         return vector.reshape(SEEKED_SEGMENT_SHAPE)
 
 
@@ -177,7 +173,7 @@ def _assert_arguments_v1(segment_row: int, segment_col: int, file_name: str, dat
     if metadata is None:
         metadata = _read_metadata(file_name, data_dir)
 
-    version, rows_n, cols_n, format_segment_h, format_segment_w, format_endian = metadata
+    version, rows_n, cols_n, format_segment_h, format_segment_w, metadata_bytes, format_endian = metadata
     assert version == 1, "Given file does not support version 1."
 
     # verify segment's indices
@@ -197,8 +193,9 @@ def _read_metadata(file_name: str, data_dir: str = "grids") -> GridFileMetadata:
     """
     with open(os.path.join(data_dir, file_name), "r") as file:
         first_line = file.readline()
+        metadata_bytes = file.tell()
         splitted = first_line.split(METADATA_SEPARATOR)
-        result = list(map(int, splitted[:-1]))
+        result = list(map(int, splitted[:-1] + [metadata_bytes]))
         result += [splitted[-1]]
         return result
     
